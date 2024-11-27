@@ -1,0 +1,321 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "CloudFormation Template for Java Project Software Delivery Pipeline using GitHub",
+    "Parameters": {
+        "GitHubOwner": {
+            "Type": "String",
+            "Description": "GitHub repository owner",
+            "Default": "VictorOshiomah"
+        },
+        "GitHubRepo": {
+            "Type": "String",
+            "Description": "GitHub repository name",
+            "Default": "Software_Delivery_Pipeline_Assignment"
+        },
+        "GitHubBranch": {
+            "Type": "String",
+            "Description": "GitHub branch name",
+            "Default": "main"
+        },
+        "GitHubToken": {
+            "Type": "String",
+            "NoEcho": true,
+            "Description": "GitHub OAuth token"
+        }
+    },
+    "Resources": {
+        "ArtifactBucket": {
+            "Type": "AWS::S3::Bucket",
+            "Properties": {
+                "VersioningConfiguration": {
+                    "Status": "Enabled"
+                }
+            }
+        },
+        "AppBuildRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "codebuild.amazonaws.com"
+                            },
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                },
+                "Policies": [
+                    {
+                        "PolicyName": "CodeBuildPolicy",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "logs:CreateLogGroup",
+                                        "logs:CreateLogStream",
+                                        "logs:PutLogEvents"
+                                    ],
+                                    "Resource": "*"
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "s3:PutObject",
+                                        "s3:GetObject",
+                                        "s3:GetObjectVersion"
+                                    ],
+                                    "Resource": [
+                                        {
+                                            "Fn::GetAtt": [
+                                                "ArtifactBucket",
+                                                "Arn"
+                                            ]
+                                        },
+                                        {
+                                            "Fn::Join": [
+                                                "",
+                                                [
+                                                    {
+                                                        "Fn::GetAtt": [
+                                                            "ArtifactBucket",
+                                                            "Arn"
+                                                        ]
+                                                    },
+                                                    "/*"
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "AppBuildProject": {
+            "Type": "AWS::CodeBuild::Project",
+            "Properties": {
+                "Name": "java-project-build",
+                "Source": {
+                    "Type": "CODEPIPELINE",
+                    "BuildSpec": "java-project/buildspec.yml"
+                },
+                "Environment": {
+                    "ComputeType": "BUILD_GENERAL1_SMALL",
+                    "Image": "aws/codebuild/amazonlinux2-x86_64-standard:4.0",
+                    "Type": "LINUX_CONTAINER"
+                },
+                "Artifacts": {
+                    "Type": "CODEPIPELINE"
+                },
+                "ServiceRole": {
+                    "Fn::GetAtt": [
+                        "AppBuildRole",
+                        "Arn"
+                    ]
+                }
+            }
+        },
+        "CodePipelineServiceRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "codepipeline.amazonaws.com"
+                            },
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                },
+                "Path": "/service-role/",
+                "Policies": [
+                    {
+                        "PolicyName": "ec2codedeploy",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "s3:PutObject",
+                                        "s3:GetObject",
+                                        "s3:GetBucketAcl",
+                                        "s3:GetBucketLocation"
+                                    ],
+                                    "Resource": [
+                                        {
+                                            "Fn::GetAtt": [
+                                                "ArtifactBucket",
+                                                "Arn"
+                                            ]
+                                        },
+                                        {
+                                            "Fn::Join": [
+                                                "",
+                                                [
+                                                    {
+                                                        "Fn::GetAtt": [
+                                                            "ArtifactBucket",
+                                                            "Arn"
+                                                        ]
+                                                    },
+                                                    "/*"
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "codestar-connections:UseConnection"
+                                    ],
+                                    "Resource": "*"
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "codebuild:BatchGetBuilds",
+                                        "codebuild:StartBuild"
+                                    ],
+                                    "Resource": {
+                                        "Fn::GetAtt": [
+                                            "AppBuildProject",
+                                            "Arn"
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "MyPipeline": {
+            "Type": "AWS::CodePipeline::Pipeline",
+            "Properties": {
+                "Name": "java-project-pipeline",
+                "RoleArn": {
+                    "Fn::GetAtt": [
+                        "CodePipelineServiceRole",
+                        "Arn"
+                    ]
+                },
+                "Stages": [
+                    {
+                        "Name": "Source",
+                        "Actions": [
+                            {
+                                "Name": "Source",
+                                "ActionTypeId": {
+                                    "Category": "Source",
+                                    "Owner": "ThirdParty",
+                                    "Version": "1",
+                                    "Provider": "GitHub"
+                                },
+                                "Configuration": {
+                                    "Owner": {
+                                        "Ref": "GitHubOwner"
+                                    },
+                                    "Repo": {
+                                        "Ref": "GitHubRepo"
+                                    },
+                                    "Branch": {
+                                        "Ref": "GitHubBranch"
+                                    },
+                                    "OAuthToken": {
+                                        "Ref": "GitHubToken"
+                                    }
+                                },
+                                "OutputArtifacts": [
+                                    {
+                                        "Name": "SourceOutput"
+                                    }
+                                ],
+                                "RunOrder": 1
+                            }
+                        ]
+                    },
+                    {
+                        "Name": "Build",
+                        "Actions": [
+                            {
+                                "Name": "Build",
+                                "ActionTypeId": {
+                                    "Category": "Build",
+                                    "Owner": "AWS",
+                                    "Version": "1",
+                                    "Provider": "CodeBuild"
+                                },
+                                "Configuration": {
+                                    "ProjectName": {
+                                        "Ref": "AppBuildProject"
+                                    }
+                                },
+                                "InputArtifacts": [
+                                    {
+                                        "Name": "SourceOutput"
+                                    }
+                                ],
+                                "OutputArtifacts": [
+                                    {
+                                        "Name": "BuildOutput"
+                                    }
+                                ],
+                                "RunOrder": 1
+                            }
+                        ]
+                    }
+                ],
+                "ArtifactStore": {
+                    "Type": "S3",
+                    "Location": {
+                        "Ref": "ArtifactBucket"
+                    }
+                }
+            }
+        }
+    },
+    "Outputs": {
+        "PipelineName": {
+            "Description": "The name of the pipeline",
+            "Value": {
+                "Ref": "MyPipeline"
+            }
+        },
+        "PipelineRole": {
+            "Description": "IAM Role for CodePipeline",
+            "Value": {
+                "Fn::GetAtt": [
+                    "CodePipelineServiceRole",
+                    "Arn"
+                ]
+            }
+        },
+        "BuildRole": {
+            "Description": "IAM Role for CodeBuild",
+            "Value": {
+                "Fn::GetAtt": [
+                    "AppBuildRole",
+                    "Arn"
+                ]
+            }
+        },
+        "ArtifactBucketName": {
+            "Description": "Name of the artifact bucket",
+            "Value": {
+                "Ref": "ArtifactBucket"
+            }
+        }
+    }
+}
