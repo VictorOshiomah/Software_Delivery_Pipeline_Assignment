@@ -4,15 +4,22 @@ phases:
   install:
     runtime-versions:
       java: corretto8
+    commands:
+      - echo "Installing dependencies if necessary..."
   pre_build:
     commands:
+      - echo "Environment variables:"
       - env
-      - ant -f test.xml -v
+      - echo "Navigating to the java-project directory..."
+      - cd java-project
+      - echo "Running test phase with Ant..."
+      - ant -f test.xml -v || exit 1
   build:
     commands:
-      - ant -f build.xml -v
+      - echo "Running build phase with Ant..."
+      - ant -f build.xml -v || exit 1
 
 artifacts:
   files:
-    - dist/rectangle.jar
+    - java-project/dist/rectangle.jar
   name: rectangle-$(date +%y%m%d%H%M).zip
